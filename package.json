@@ -1,0 +1,21 @@
+{
+  "name": "eventplanner",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "sample-data": "echo \"Open browser console and run: window.createSampleData()\""
+  },
+  "devDependencies": {
+    "@types/uuid": "^10.0.0",
+    "typescript": "~5.8.3",
+    "vite": "^7.1.2"
+  },
+  "dependencies": {
+    "sass": "^1.92.0",
+    "uuid": "^11.1.0"
+  }
+}
