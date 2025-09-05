@@ -35,9 +35,7 @@ export class Dashboard {
     await this.loadEvents();
     this.setupRouter();
     this.router.init();
-    
-    // Start with dashboard page
-    this.showDashboardPage();
+    await this.showDashboardPage();
   }
 
   /**
@@ -79,16 +77,12 @@ export class Dashboard {
   /**
    * Show the main dashboard page
    */
-  private showDashboardPage(): void {
-    this.renderDashboard();
+  private async showDashboardPage(): Promise<void> {
+    await this.renderDashboard();
     this.setupDashboardComponents();
     this.setupDashboardEventListeners();
-    
-    // Automatically select today's date to show today's events by default
     this.selectedDate = new Date();
     this.updateEventList();
-    
-    // Also update the calendar to highlight today
     if (this.calendar) {
       this.calendar.setSelectedDate(new Date());
     }
@@ -386,9 +380,9 @@ export class Dashboard {
   /**
    * Render the main dashboard layout
    */
-  private renderDashboard(): void {
-    const config = this.configService.getConfig();
-    
+  private async renderDashboard(): Promise<void> {
+    const config = await this.configService.getConfig();
+
     this.container.innerHTML = `
       <div class="dashboard">
         <div class="dashboard__header">

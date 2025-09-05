@@ -1,33 +1,13 @@
 /*
- * Event Planner Complete Setup Script
- * 
- * This script runs all the necessary setup scripts in the correct order.
- * Use this for a complete fresh installation.
- * 
- * Prerequisites:
- * 1. SQL Server instance running
- * 2. SQL Server Management Studio or sqlcmd access
- * 3. Administrator/sysadmin privileges
- * 
- * Instructions:
- * 1. Open SQL Server Management Studio
- * 2. Connect as an administrator (sysadmin role)
- * 3. Open and execute this script
- * 4. Check output messages for any errors
- * 5. Use the connection string provided at the end
- * 
- * What this script does:
- * 1. Creates EventPlannerDB database
- * 2. Creates EventPlannerApp user with appropriate permissions
- * 3. Creates all required tables with proper indexes
- * 4. Inserts default categories and priorities
- * 5. Creates stored procedures for application use
- * 6. Creates sample venue for testing
+ * Event Planner Complete Setup Script (Safe for SSMS)
+ * - No hard-coded file paths (uses SQL Server defaults)
+ * - No batch separators (variables remain in scope)
+ * - Guards and clear error handling
  */
 
 PRINT '===============================================';
 PRINT '    Event Planner Database Setup';
-PRINT '    Version 1.0 - ' + CONVERT(VARCHAR, GETDATE(), 120);
+PRINT '    Version 1.1 - ' + CONVERT(VARCHAR, GETDATE(), 120);
 PRINT '===============================================';
 PRINT '';
 
@@ -37,153 +17,142 @@ PRINT 'SQL Server Version: ' + @Version;
 PRINT '';
 
 -- Record start time
-DECLARE @StartTime DATETIME2 = GETUTCDATE();
+DECLARE @StartTime DATETIME2 = SYSUTCDATETIME();
 PRINT 'Setup started at: ' + CONVERT(VARCHAR, @StartTime, 120) + ' UTC';
 PRINT '';
 
--- ==================================================
--- STEP 1: CREATE DATABASE
--- ==================================================
-PRINT 'STEP 1: Creating database...';
+BEGIN TRY
+  --------------------------------------------------
+  -- STEP 1: CREATE DATABASE
+  --------------------------------------------------
+  PRINT 'STEP 1: Creating database...';
 
-USE master;
-GO
-
--- Check if database exists and drop it if needed (for fresh installs)
-IF EXISTS (SELECT name FROM sys.databases WHERE name = 'EventPlannerDB')
-BEGIN
+  -- If DB exists, drop it (comment this block if you do NOT want to drop)
+  IF DB_ID('EventPlannerDB') IS NOT NULL
+  BEGIN
     PRINT 'Database EventPlannerDB already exists. Dropping and recreating...';
-    
-    -- Set database to single user mode to drop it
     ALTER DATABASE EventPlannerDB SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
     DROP DATABASE EventPlannerDB;
     PRINT 'Existing database dropped.';
-END
+  END
 
--- Create the database
-CREATE DATABASE EventPlannerDB
-ON 
-(
-    NAME = 'EventPlannerDB_Data',
-    FILENAME = 'C:\Program Files\Microsoft SQL Server\MSSQL16.MSSQLSERVER\MSSQL\DATA\EventPlannerDB.mdf',
-    SIZE = 100MB,
-    MAXSIZE = 1GB,
-    FILEGROWTH = 10MB
-)
-LOG ON 
-(
-    NAME = 'EventPlannerDB_Log',
-    FILENAME = 'C:\Program Files\Microsoft SQL Server\MSSQL16.MSSQLSERVER\MSSQL\DATA\EventPlannerDB.ldf',
-    SIZE = 10MB,
-    MAXSIZE = 100MB,
-    FILEGROWTH = 1MB
-);
-GO
+  -- Create database using default instance paths (no hard-coded file locations)
+  EXEC('CREATE DATABASE EventPlannerDB');
 
--- Set database options for optimal performance
-ALTER DATABASE EventPlannerDB SET RECOVERY SIMPLE;
-ALTER DATABASE EventPlannerDB SET AUTO_CLOSE OFF;
-ALTER DATABASE EventPlannerDB SET AUTO_SHRINK OFF;
-ALTER DATABASE EventPlannerDB SET AUTO_UPDATE_STATISTICS ON;
-ALTER DATABASE EventPlannerDB SET AUTO_CREATE_STATISTICS ON;
-GO
+  -- Wait until the database is visible and ONLINE (handles slow disk/metadata)
+  DECLARE @retries INT = 0;
+  WHILE (
+      DB_ID('EventPlannerDB') IS NULL OR EXISTS(
+        SELECT 1 FROM sys.databases WHERE name = 'EventPlannerDB' AND state_desc <> 'ONLINE'
+      )
+    ) AND @retries < 30
+  BEGIN
+    SET @retries += 1;
+    WAITFOR DELAY '00:00:01'; -- 1 second
+  END
 
-PRINT 'STEP 1: Database created successfully!';
-PRINT '';
+  IF DB_ID('EventPlannerDB') IS NULL
+    THROW 50010, 'Database EventPlannerDB was not created.', 1;
 
--- ==================================================
--- STEP 2: CREATE USER
--- ==================================================
-PRINT 'STEP 2: Creating application user...';
+  -- Set database options (only if DB exists)
+  IF DB_ID('EventPlannerDB') IS NOT NULL
+  BEGIN
+    ALTER DATABASE EventPlannerDB SET RECOVERY SIMPLE;
+    ALTER DATABASE EventPlannerDB SET AUTO_CLOSE OFF;
+    ALTER DATABASE EventPlannerDB SET AUTO_SHRINK OFF;
+    ALTER DATABASE EventPlannerDB SET AUTO_UPDATE_STATISTICS ON;
+    ALTER DATABASE EventPlannerDB SET AUTO_CREATE_STATISTICS ON;
+  END
 
-USE master;
-GO
+  PRINT 'STEP 1: Database created successfully!';
+  PRINT '';
 
--- Variables for user credentials
-DECLARE @LoginName NVARCHAR(50) = 'EventPlannerApp';
-DECLARE @Password NVARCHAR(50) = 'EventPlanner2025!';
-DECLARE @DatabaseName NVARCHAR(50) = 'EventPlannerDB';
+  --------------------------------------------------
+  -- STEP 2: CREATE USER
+  --------------------------------------------------
+  PRINT 'STEP 2: Creating application user...';
 
--- Check if login already exists and drop it
-IF EXISTS (SELECT name FROM sys.server_principals WHERE name = @LoginName)
-BEGIN
+  -- Variables for user credentials (change password for production)
+  DECLARE @LoginName NVARCHAR(50) = 'EventPlannerApp';
+  DECLARE @Password  NVARCHAR(128) = 'EventPlanner2025!';
+
+  -- Create (or recreate) SQL Server login
+  IF EXISTS (SELECT 1 FROM sys.server_principals WHERE name = @LoginName)
+  BEGIN
     PRINT 'Login ' + @LoginName + ' already exists. Dropping and recreating...';
-    DROP LOGIN [EventPlannerApp];
-END
+    DECLARE @DropLogin NVARCHAR(MAX) = 'DROP LOGIN [' + @LoginName + ']';
+    EXEC(@DropLogin);
+  END
 
--- Create SQL Server login
-EXECUTE ('CREATE LOGIN [' + @LoginName + '] WITH PASSWORD = ''' + @Password + ''', 
-    DEFAULT_DATABASE = [' + @DatabaseName + '], 
-    CHECK_EXPIRATION = OFF, 
-    CHECK_POLICY = OFF');
+  DECLARE @CreateLogin NVARCHAR(MAX) = 'CREATE LOGIN [' + @LoginName + '] WITH PASSWORD = ''' + @Password + ''', CHECK_EXPIRATION = OFF, CHECK_POLICY = OFF';
+  EXEC(@CreateLogin);
 
--- Switch to the Event Planner database
-USE EventPlannerDB;
-GO
+  -- Create user in EventPlannerDB and grant permissions (guarded by existence)
+  IF DB_ID('EventPlannerDB') IS NULL
+    THROW 50011, 'Cannot create user because EventPlannerDB does not exist.', 1;
 
--- Create database user for the login
-IF EXISTS (SELECT name FROM sys.database_principals WHERE name = 'EventPlannerApp')
-BEGIN
-    DROP USER [EventPlannerApp];
-END
+  EXEC('USE EventPlannerDB;');
 
-CREATE USER [EventPlannerApp] FOR LOGIN [EventPlannerApp];
-GO
+  IF EXISTS (SELECT 1 FROM sys.database_principals WHERE name = @LoginName)
+  BEGIN
+    DECLARE @DropUser NVARCHAR(MAX) = 'DROP USER [' + @LoginName + ']';
+    EXEC(@DropUser);
+  END
 
--- Grant necessary permissions to the user
-ALTER ROLE db_datareader ADD MEMBER [EventPlannerApp];
-ALTER ROLE db_datawriter ADD MEMBER [EventPlannerApp];
-GRANT EXECUTE ON SCHEMA::dbo TO [EventPlannerApp];
-GRANT CREATE TABLE TO [EventPlannerApp];
-GRANT ALTER ON SCHEMA::dbo TO [EventPlannerApp];
+  DECLARE @CreateUser NVARCHAR(MAX) = 'CREATE USER [' + @LoginName + '] FOR LOGIN [' + @LoginName + ']';
+  EXEC(@CreateUser);
 
-PRINT 'STEP 2: User created successfully!';
-PRINT '';
+  -- Minimal required permissions
+  EXEC sp_addrolemember N'db_datareader', @LoginName;
+  EXEC sp_addrolemember N'db_datawriter', @LoginName;
+  GRANT EXECUTE ON SCHEMA::dbo TO [EventPlannerApp];
+  GRANT CREATE TABLE TO [EventPlannerApp];
+  GRANT ALTER ON SCHEMA::dbo TO [EventPlannerApp];
 
--- ==================================================
--- STEP 3: CREATE TABLES
--- ==================================================
-PRINT 'STEP 3: Creating database tables...';
+  PRINT 'STEP 2: User created successfully!';
+  PRINT '';
 
-USE EventPlannerDB;
-GO
+  --------------------------------------------------
+  -- STEP 3: CREATE TABLES
+  --------------------------------------------------
+  PRINT 'STEP 3: Creating database tables...';
+  PRINT 'NOTE: Run 03_create_tables.sql next.';
+  PRINT 'STEP 3: Tables creation step completed (pending external script).';
+  PRINT '';
 
--- Include all table creation code here (same as 03_create_tables.sql)
--- ... (table creation code would go here - abbreviated for brevity)
+  --------------------------------------------------
+  -- STEP 4: INSERT DEFAULT DATA
+  --------------------------------------------------
+  PRINT 'STEP 4: Inserting default data...';
+  PRINT 'NOTE: Run 04_insert_default_data.sql after creating tables.';
+  PRINT 'STEP 4: Default data insertion step completed (pending external script).';
+  PRINT '';
 
-PRINT 'STEP 3: Tables created successfully!';
-PRINT '';
+  --------------------------------------------------
+  -- STEP 5: CREATE STORED PROCEDURES
+  --------------------------------------------------
+  PRINT 'STEP 5: Creating stored procedures...';
+  PRINT 'NOTE: Run 05_create_procedures.sql after default data.';
+  PRINT 'STEP 5: Stored procedures creation step completed (pending external script).';
+  PRINT '';
 
--- ==================================================
--- STEP 4: INSERT DEFAULT DATA
--- ==================================================
-PRINT 'STEP 4: Inserting default data...';
+END TRY
+BEGIN CATCH
+  PRINT '*** ERROR OCCURRED ***';
+  PRINT 'Message  : ' + ERROR_MESSAGE();
+  PRINT 'Severity : ' + CAST(ERROR_SEVERITY() AS VARCHAR(10));
+  PRINT 'State    : ' + CAST(ERROR_STATE() AS VARCHAR(10));
+  PRINT 'Line     : ' + CAST(ERROR_LINE() AS VARCHAR(10));
+  PRINT '';
+  PRINT 'Terminating setup due to errors.';
+END CATCH;
 
--- Insert default categories, priorities, and sample venue
--- ... (default data insertion code would go here)
-
-PRINT 'STEP 4: Default data inserted successfully!';
-PRINT '';
-
--- ==================================================
--- STEP 5: CREATE STORED PROCEDURES
--- ==================================================
-PRINT 'STEP 5: Creating stored procedures...';
-
--- Create all stored procedures
--- ... (stored procedure creation code would go here)
-
-PRINT 'STEP 5: Stored procedures created successfully!';
-PRINT '';
-
--- ==================================================
--- SETUP COMPLETE
--- ==================================================
-DECLARE @EndTime DATETIME2 = GETUTCDATE();
+-- Completion info
+DECLARE @EndTime DATETIME2 = SYSUTCDATETIME();
 DECLARE @Duration INT = DATEDIFF(SECOND, @StartTime, @EndTime);
 
 PRINT '===============================================';
-PRINT '    SETUP COMPLETED SUCCESSFULLY!';
+PRINT '    SETUP COMPLETED (see notes above)';
 PRINT '===============================================';
 PRINT '';
 PRINT 'Setup completed at: ' + CONVERT(VARCHAR, @EndTime, 120) + ' UTC';
@@ -198,15 +167,10 @@ PRINT '';
 PRINT '=== CONNECTION STRING ===';
 PRINT 'Server=localhost;Database=EventPlannerDB;User Id=EventPlannerApp;Password=EventPlanner2025!;TrustServerCertificate=True;';
 PRINT '';
-PRINT '=== SAMPLE VENUE FOR TESTING ===';
-PRINT 'Venue Code: DEMO';
-PRINT 'Venue Name: Demo Convention Center';
-PRINT '';
 PRINT '=== NEXT STEPS ===';
-PRINT '1. Update your application configuration to use SQL Server';
-PRINT '2. Test the connection using the provided connection string';
-PRINT '3. Create additional venues as needed for your clients';
-PRINT '4. Configure your application to use the sample venue code "DEMO"';
+PRINT '1) Run 03_create_tables.sql';
+PRINT '2) Run 04_insert_default_data.sql';
+PRINT '3) Run 05_create_procedures.sql';
 PRINT '';
 PRINT 'For cleanup, run: 99_cleanup.sql';
-GO
+-- End of script
