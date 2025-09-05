@@ -1,22 +1,16 @@
 import type { VenueConfig } from '../models/VenueConfig.js';
-import { DEFAULT_CONFIG } from '../models/VenueConfig.js';
 
 /**
- * Service for managing venue configuration
- * Handles loading, saving, and updating configuration settings
+ * ConfigService now loads/saves configuration via backend API (SQL Server)
  */
 export class ConfigService {
-  private static readonly STORAGE_KEY = 'event-planner-config';
   private static instance: ConfigService | null = null;
-  private config: VenueConfig;
+  private config: VenueConfig | null = null;
+  private static readonly API_BASE = '/api';
+  private venueCode = 'DEMO'; // could be dynamic later
 
-  private constructor() {
-    this.config = this.loadConfig();
-  }
+  private constructor() {}
 
-  /**
-   * Get the singleton instance of ConfigService
-   */
   public static getInstance(): ConfigService {
     if (!ConfigService.instance) {
       ConfigService.instance = new ConfigService();
@@ -24,171 +18,178 @@ export class ConfigService {
     return ConfigService.instance;
   }
 
-  /**
-   * Load configuration from localStorage
-   * If no config exists, returns default configuration
-   */
-  private loadConfig(): VenueConfig {
-    try {
-      const stored = localStorage.getItem(ConfigService.STORAGE_KEY);
-      if (stored) {
-        const parsedConfig = JSON.parse(stored);
-        // Merge with defaults to ensure all properties exist
-        return { ...DEFAULT_CONFIG, ...parsedConfig };
-      }
-    } catch (error) {
-      console.warn('Failed to load configuration, using defaults:', error);
-    }
-    
-    return { ...DEFAULT_CONFIG };
+  private async ensureLoaded() {
+    if (this.config) return;
+    const res = await fetch(`${ConfigService.API_BASE}/config/${this.venueCode}`);
+    if (!res.ok) throw new Error('Failed to load configuration');
+    const r = await res.json();
+
+    this.config = {
+      companyName: r.CompanyName,
+      logo: r.Logo ?? '📅',
+      tagline: r.Tagline ?? '',
+      primaryColor: r.PrimaryColor,
+      secondaryColor: r.SecondaryColor,
+      venueName: r.VenueName,
+      venueAddress: r.Address ?? '',
+      venuePhone: r.ContactPhone ?? '',
+      venueEmail: r.ContactEmail ?? '',
+      venueWebsite: r.Website ?? '',
+      locations: [],
+      customCategories: [],
+      customPriorities: [],
+      defaultEventDuration: r.DefaultEventDuration ?? 1,
+      defaultCategory: r.DefaultCategory ?? 'meeting',
+      defaultPriority: r.DefaultPriority ?? 'normal',
+      timeFormat: (r.TimeFormat ?? '12h'),
+      dateFormat: (r.DateFormat ?? 'MM/DD/YYYY'),
+      firstDayOfWeek: (r.FirstDayOfWeek ?? 0),
+      features: {
+        showAttendees: !!r.ShowAttendees,
+        showLocation: !!r.ShowLocation,
+        showDescription: !!r.ShowDescription,
+        allowRecurring: !!r.AllowRecurring,
+        allowFileAttachments: !!r.AllowFileAttachments,
+      },
+    } as VenueConfig;
+
+    // Load lists from API
+    const venueId = r.VenueId || r.venueId;
+    const [catsRes, priosRes, locsRes] = await Promise.all([
+      fetch(`${ConfigService.API_BASE}/categories?venueId=${venueId}`),
+      fetch(`${ConfigService.API_BASE}/priorities?venueId=${venueId}`),
+      fetch(`${ConfigService.API_BASE}/locations?venueId=${venueId}`),
+    ]);
+
+    const [cats, prios, locs] = await Promise.all([
+      catsRes.ok ? catsRes.json() : [],
+      priosRes.ok ? priosRes.json() : [],
+      locsRes.ok ? locsRes.json() : [],
+    ]);
+
+    this.config.locations = (locs || []).map((l: any) => ({
+      id: l.LocationId,
+      name: l.LocationName,
+      description: l.Description ?? '',
+      capacity: l.Capacity ?? undefined,
+      amenities: (l.Amenities ? String(l.Amenities).split(',') : []),
+      isActive: true,
+    }));
+
+    this.config.customCategories = (cats || []).map((c: any) => ({
+      id: c.CategoryCode,
+      name: c.CategoryName,
+      color: c.Color,
+      icon: c.Icon ?? '',
+      isActive: true,
+    }));
+
+    this.config.customPriorities = (prios || []).map((p: any) => ({
+      id: p.PriorityCode,
+      name: p.PriorityName,
+      color: p.Color,
+      level: p.Level ?? 5,
+      isActive: true,
+    }));
   }
 
-  /**
-   * Save configuration to localStorage
-   */
-  private saveConfig(): void {
-    try {
-      localStorage.setItem(ConfigService.STORAGE_KEY, JSON.stringify(this.config));
-    } catch (error) {
-      console.error('Failed to save configuration:', error);
-    }
+  public async getConfig(): Promise<VenueConfig> {
+    await this.ensureLoaded();
+    return { ...(this.config as VenueConfig) };
   }
 
-  /**
-   * Get the current configuration
-   */
-  public getConfig(): VenueConfig {
-    return { ...this.config };
+  public async updateConfig(updates: Partial<VenueConfig>): Promise<void> {
+    await this.ensureLoaded();
+    const current = this.config as VenueConfig;
+    const merged = { ...current, ...updates } as VenueConfig;
+
+    // Persist to API (maps to sp_UpdateVenueConfiguration)
+    const payload = {
+      venueId: await this.getVenueId(),
+      companyName: merged.companyName,
+      logo: merged.logo,
+      tagline: merged.tagline,
+      primaryColor: merged.primaryColor,
+      secondaryColor: merged.secondaryColor,
+      timeFormat: merged.timeFormat,
+      dateFormat: merged.dateFormat,
+      firstDayOfWeek: merged.firstDayOfWeek,
+      defaultEventDuration: merged.defaultEventDuration,
+      defaultCategory: merged.defaultCategory,
+      defaultPriority: merged.defaultPriority,
+      showAttendees: merged.features.showAttendees,
+      showLocation: merged.features.showLocation,
+      showDescription: merged.features.showDescription,
+      allowRecurring: merged.features.allowRecurring,
+      allowFileAttachments: merged.features.allowFileAttachments,
+    };
+
+    const res = await fetch(`${ConfigService.API_BASE}/config`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (!res.ok) throw new Error('Failed to update configuration');
+
+    this.config = merged;
+    this.applyTheme();
   }
 
-  /**
-   * Update the configuration with new values
-   */
-  public updateConfig(updates: Partial<VenueConfig>): void {
-    this.config = { ...this.config, ...updates };
-    this.saveConfig();
-  }
-
-  /**
-   * Reset configuration to defaults
-   */
-  public resetToDefaults(): void {
-    this.config = { ...DEFAULT_CONFIG };
-    this.saveConfig();
-  }
-
-  /**
-   * Get active locations (for dropdown menus)
-   */
-  public getActiveLocations() {
-    return this.config.locations.filter(location => location.isActive);
-  }
-
-  /**
-   * Get all categories (default + custom active ones)
-   */
-  public getAllCategories() {
-    const defaultCategories = [
-      { id: 'meeting', name: 'Meeting', color: '#3b82f6' },
-      { id: 'personal', name: 'Personal', color: '#10b981' },
-      { id: 'work', name: 'Work', color: '#f59e0b' },
-      { id: 'other', name: 'Other', color: '#6b7280' }
-    ];
-
-    const customCategories = (this.config.customCategories || [])
-      .filter(cat => cat.isActive)
-      .map(cat => ({ id: cat.id, name: cat.name, color: cat.color }));
-
-    return [...defaultCategories, ...customCategories];
-  }
-
-  /**
-   * Get all priorities (default + custom active ones)
-   */
-  public getAllPriorities() {
-    const defaultPriorities = [
-      { id: 'high', name: 'High', color: '#ef4444' },
-      { id: 'medium', name: 'Medium', color: '#f59e0b' },
-      { id: 'low', name: 'Low', color: '#10b981' }
-    ];
-
-    const customPriorities = (this.config.customPriorities || [])
-      .filter(priority => priority.isActive)
-      .map(priority => ({ id: priority.id, name: priority.name, color: priority.color }))
-      .sort((a, b) => {
-        const aLevel = this.config.customPriorities?.find(p => p.id === a.id)?.level || 5;
-        const bLevel = this.config.customPriorities?.find(p => p.id === b.id)?.level || 5;
-        return bLevel - aLevel; // Sort descending (highest priority first)
-      });
-
-    return [...defaultPriorities, ...customPriorities];
-  }
-
-  /**
-   * Apply theme colors to CSS custom properties
-   */
   public applyTheme(): void {
+    if (!this.config) return;
     const root = document.documentElement;
     root.style.setProperty('--primary-color', this.config.primaryColor);
     root.style.setProperty('--secondary-color', this.config.secondaryColor);
   }
 
-  /**
-   * Get formatted date string based on user preference
-   */
-  public formatDate(date: Date): string {
-    const format = this.config.dateFormat;
-    const day = date.getDate().toString().padStart(2, '0');
-    const month = (date.getMonth() + 1).toString().padStart(2, '0');
-    const year = date.getFullYear().toString();
+  public async getActiveLocations() {
+    const cfg = await this.getConfig();
+    return cfg.locations.filter(l => l.isActive);
+  }
 
-    switch (format) {
-      case 'DD/MM/YYYY':
-        return `${day}/${month}/${year}`;
-      case 'YYYY-MM-DD':
-        return `${year}-${month}-${day}`;
-      case 'MM/DD/YYYY':
-      default:
-        return `${month}/${day}/${year}`;
+  public async getAllCategories() {
+    const cfg = await this.getConfig();
+    // Default base categories
+    const defaultCategories = [
+      { id: 'meeting', name: 'Meeting', color: '#3b82f6' },
+      { id: 'personal', name: 'Personal', color: '#10b981' },
+      { id: 'work', name: 'Work', color: '#f59e0b' },
+      { id: 'other', name: 'Other', color: '#6b7280' },
+    ];
+    return [...defaultCategories, ...(cfg.customCategories || [])];
+  }
+
+  public async getAllPriorities() {
+    const cfg = await this.getConfig();
+    const defaultPriorities = [
+      { id: 'high', name: 'High', color: '#ef4444' },
+      { id: 'medium', name: 'Medium', color: '#f59e0b' },
+      { id: 'low', name: 'Low', color: '#10b981' },
+    ];
+    const custom = (cfg.customPriorities || []).sort((a, b) => b.level - a.level);
+    return [...defaultPriorities, ...custom];
+  }
+
+  public async exportConfig(): Promise<string> {
+    const cfg = await this.getConfig();
+    return JSON.stringify(cfg, null, 2);
     }
-  }
 
-  /**
-   * Get formatted time string based on user preference
-   */
-  public formatTime(date: Date): string {
-    const options: Intl.DateTimeFormatOptions = {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: this.config.timeFormat === '12h'
-    };
-    
-    return date.toLocaleTimeString('en-US', options);
-  }
-
-  /**
-   * Export configuration as JSON string
-   */
-  public exportConfig(): string {
-    return JSON.stringify(this.config, null, 2);
-  }
-
-  /**
-   * Import configuration from JSON string
-   */
-  public importConfig(jsonString: string): boolean {
+  public async importConfig(jsonString: string): Promise<boolean> {
     try {
-      const importedConfig = JSON.parse(jsonString);
-      // Validate that it has the required structure
-      if (importedConfig && typeof importedConfig === 'object') {
-        this.config = { ...DEFAULT_CONFIG, ...importedConfig };
-        this.saveConfig();
-        this.applyTheme();
-        return true;
-      }
-    } catch (error) {
-      console.error('Failed to import configuration:', error);
+      const imported = JSON.parse(jsonString);
+      await this.updateConfig(imported);
+      return true;
+    } catch (e) {
+      console.error('Failed to import configuration:', e);
+      return false;
     }
-    return false;
+  }
+
+  private async getVenueId(): Promise<string> {
+    const res = await fetch(`${ConfigService.API_BASE}/config/${this.venueCode}`);
+    const c = await res.json();
+    return c.VenueId || c.venueId;
   }
 }

@@ -8,18 +8,18 @@ import type { VenueConfig, LocationOption, CategoryOption, PriorityOption } from
 export class ConfigPage {
   private container: HTMLElement;
   private configService: ConfigService;
-  private config: VenueConfig;
+  private config!: VenueConfig;
 
   constructor(container: HTMLElement) {
     this.container = container;
     this.configService = ConfigService.getInstance();
-    this.config = this.configService.getConfig();
   }
 
   /**
    * Render the configuration page
    */
-  public render(): void {
+  public async render(): Promise<void> {
+    this.config = await this.configService.getConfig();
     this.container.innerHTML = `
       <div class="config-page">
         <div class="config-header">
@@ -344,7 +344,7 @@ export class ConfigPage {
   /**
    * Save the configuration
    */
-  private saveConfig(): void {
+  private async saveConfig(): Promise<void> {
     try {
       // Collect all form data
       const updates: Partial<VenueConfig> = {
@@ -372,7 +372,7 @@ export class ConfigPage {
       };
 
       // Update configuration
-      this.configService.updateConfig(updates);
+      await this.configService.updateConfig(updates);
       this.configService.applyTheme();
 
       alert('Configuration saved successfully!');
@@ -395,23 +395,17 @@ export class ConfigPage {
   /**
    * Reset configuration to defaults
    */
-  private resetConfig(): void {
-    if (confirm('Are you sure you want to reset all settings to defaults? This cannot be undone.')) {
-      this.configService.resetToDefaults();
-      this.configService.applyTheme();
-      alert('Configuration reset to defaults.');
-      this.render(); // Re-render with default values
-    }
+  private async resetConfig(): Promise<void> {
+    alert('Reset to defaults from DB is not implemented in this UI yet.');
   }
 
   /**
    * Export configuration
    */
-  private exportConfig(): void {
-    const configJson = this.configService.exportConfig();
-    const blob = new Blob([configJson], { type: 'application/json' });
+  private async exportConfig(): Promise<void> {
+    const json = await this.configService.exportConfig();
+    const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
-    
     const a = document.createElement('a');
     a.href = url;
     a.download = 'event-planner-config.json';
@@ -424,17 +418,17 @@ export class ConfigPage {
   /**
    * Import configuration
    */
-  private importConfig(): void {
+  private async importConfig(): Promise<void> {
     const fileInput = document.getElementById('import-file') as HTMLInputElement;
     fileInput.click();
     
-    fileInput.onchange = (e) => {
+    fileInput.onchange = async (e) => {
       const file = (e.target as HTMLInputElement).files?.[0];
       if (file) {
         const reader = new FileReader();
-        reader.onload = (e) => {
+        reader.onload = async (e) => {
           const content = e.target?.result as string;
-          if (this.configService.importConfig(content)) {
+          if (await this.configService.importConfig(content)) {
             alert('Configuration imported successfully!');
             this.render(); // Re-render with imported values
           } else {

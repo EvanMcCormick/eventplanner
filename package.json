@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "sample-data": "echo \"Open browser console and run: window.createSampleData()\""
+    "sample-data": "echo \"Open browser console and run: window.createSampleData()\"",
+    "api": "node ./scripts/api-server.js"
   },
   "devDependencies": {
     "@types/uuid": "^10.0.0",
@@ -15,7 +16,25 @@
     "vite": "^7.1.2"
   },
   "dependencies": {
+    "dotenv": "^17.2.2",
+    "mssql": "^11.0.1",
     "sass": "^1.92.0",
-    "uuid": "^11.1.0"
-  }
+    "uuid": "^11.1.0",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "body-parser": "^1.20.3"
+  },
+  "description": "A modern, web-based event planning application built with TypeScript, Vite, and SCSS. This application provides a beautiful calendar interface for managing events with full CRUD functionality.",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EvanMcCormick/eventplanner.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/EvanMcCormick/eventplanner/issues"
+  },
+  "homepage": "https://github.com/EvanMcCormick/eventplanner#readme"
 }
