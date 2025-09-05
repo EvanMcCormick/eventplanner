@@ -8,21 +8,23 @@
     "build": "tsc && vite build",
     "preview": "vite preview",
     "sample-data": "echo \"Open browser console and run: window.createSampleData()\"",
-    "api": "node ./scripts/api-server.js"
+    "api": "node ./scripts/api-server.js",
+    "start": "concurrently \"pnpm run api\" \"pnpm run dev\""
   },
   "devDependencies": {
     "@types/uuid": "^10.0.0",
+    "concurrently": "^9.2.1",
     "typescript": "~5.8.3",
     "vite": "^7.1.2"
   },
   "dependencies": {
+    "body-parser": "^1.20.3",
+    "cors": "^2.8.5",
     "dotenv": "^17.2.2",
+    "express": "^4.19.2",
     "mssql": "^11.0.1",
     "sass": "^1.92.0",
-    "uuid": "^11.1.0",
-    "cors": "^2.8.5",
-    "express": "^4.19.2",
-    "body-parser": "^1.20.3"
+    "uuid": "^11.1.0"
   },
   "description": "A modern, web-based event planning application built with TypeScript, Vite, and SCSS. This application provides a beautiful calendar interface for managing events with full CRUD functionality.",
   "main": "index.js",

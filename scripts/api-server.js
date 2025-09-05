@@ -39,6 +39,11 @@ async function getPool() {
   return poolPromise;
 }
 
+// Root route for friendly message
+app.get('/', (req, res) => {
+  res.send('Event Planner API is running!');
+});
+
 // Health check
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
